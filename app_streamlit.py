@@ -154,11 +154,14 @@ if gen_btn:
     write_book_yaml_locally(title, persona, chapters_parsed)
 
 with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
-    import sys, importlib, pathlib
-    ROOT = pathlib.Path(__file__).parent
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    bookgen_main = importlib.import_module("bookgen.main")
+import sys, importlib, pathlib
+
+ROOT = pathlib.Path(__file__).parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+bookgen_main = importlib.import_module("bookgen.main")
+
 
     try:
         bookgen_main.MIN_SUBSECTION_WORDS = 520
