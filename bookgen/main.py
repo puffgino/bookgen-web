@@ -13,7 +13,7 @@ from docx.oxml.ns import qn
 from openai import OpenAI
 
 # ====================== CONFIG ======================
-MODEL                 = os.getenv("BOOK_MODEL", "gpt-4o")
+MODEL                 = os.getenv("BOOK_MODEL", "gpt-4o-mini")
 SUBSECTION_TOKENS     = int(os.getenv("SUBSECTION_MAX_OUTPUT_TOKENS", "7000"))
 CHAPTER_TOKENS        = int(os.getenv("CHAPTER_MAX_OUTPUT_TOKENS", "18000"))
 
