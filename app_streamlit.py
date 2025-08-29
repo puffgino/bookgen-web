@@ -191,20 +191,3 @@ st.download_button(
     use_container_width=True,
 )
 st.caption(f"Saved on server: `{out_path}`")
-
-    # Serve .docx
-    out_path = find_output_doc(title, run_id)
-    if not out_path:
-        st.error("Generation finished but output file was not found. Check logs.")
-        st.stop()
-
-    data = out_path.read_bytes()
-    st.success("Done! Click below to download your book.")
-    st.download_button(
-        label="📥 Download .docx",
-        data=data,
-        file_name=out_path.name,
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True,
-    )
-    st.caption(f"Saved on server: `{out_path}`")
