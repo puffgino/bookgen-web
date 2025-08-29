@@ -153,18 +153,20 @@ if gen_btn:
     chapters_parsed = parse_toc_lines(toc_text)
     write_book_yaml_locally(title, persona, chapters_parsed)
 
-    with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
-        # Import QUI (dopo che env e file sono pronti)
-        bookgen_main = import_bookgen_main()
+with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
+    import sys, importlib, pathlib
+    ROOT = pathlib.Path(__file__).parent
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    bookgen_main = importlib.import_module("bookgen.main")
 
-        # (opzionale) forza target parole 500–600
-        try:
-            bookgen_main.MIN_SUBSECTION_WORDS = 520
-        except Exception:
-            pass
+    try:
+        bookgen_main.MIN_SUBSECTION_WORDS = 520
+    except Exception:
+        pass
 
-        # Eseguo generazione
-        bookgen_main.main()
+    bookgen_main.main()
+
 
     # Recupero file e offro il download
     out_path = find_output_doc(title, run_id)
