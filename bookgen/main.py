@@ -192,7 +192,7 @@ Rules:
 
 def update_memory_from_text(text: str, mem: dict):
     prompt = f"""
-Summarize the following section in 120–180 words (plain, non-marketing), then list 5 KEY CLAIMS as standalone sentences.
+Summarize the following section in 120-180 words (plain, non-marketing), then list 5 KEY CLAIMS as standalone sentences.
 
 SECTION:
 {text}
