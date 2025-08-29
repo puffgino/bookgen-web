@@ -1,66 +1,72 @@
 # app_streamlit.py
 import os
+import io
 import re
 import time
 import json
 import sys
 import importlib
 import pathlib
-import traceback
 from pathlib import Path
 
 import streamlit as st
 
 APP_TITLE = "Book Generator (Streamlit)"
+ROOT = pathlib.Path(__file__).parent
 
-# ---------- UI ----------
+# ------------------------- UI -------------------------
 st.set_page_config(page_title=APP_TITLE, page_icon="📘", layout="centered")
 st.title(APP_TITLE)
-st.caption(
-    "Paste **Title**, **Buyer persona / Voice & Style**, and **Table of Contents**. "
-    "The app uses your Streamlit **Secrets** for the OpenAI API key and generates a .docx."
-)
+st.caption("Paste Title, Buyer persona / Voice & Style, and Table of Contents. Click Generate to download the .docx.")
 
-# --- Inputs (only what you asked) ---
-title = st.text_input("Title", placeholder="Es. The EMDR Therapist’s Complete Blueprint")
+# Inputs (IT+EN labels)
+title = st.text_input(
+    "Title / Titolo",
+    placeholder="e.g., Super Easy Options Trading for Absolute Beginners",
+)
 
 persona = st.text_area(
     "Buyer persona / Voice & Style",
     height=220,
-    placeholder="Incolla qui la persona (target, tono, must/avoid,...).",
+    placeholder=(
+        "Paste the persona (target, tone, must/avoid...).\n\n"
+        "Incolla qui la persona (target, tono, must/avoid,...)."
+    ),
 )
 
 toc_text = st.text_area(
-    "Table of Contents (simple text paste)",
+    "Table of Contents (simple text paste) / Indice (incolla testo semplice)",
     height=320,
     placeholder=(
-        "Esempio:\n"
+        "Example / Esempio:\n"
         "INTRODUCTION\n"
-        "How to Use This Book for Real Clinical Impact\n"
+        "How to Use This Book for Real Impact\n"
         "A Note on Ethics and Client Safety\n\n"
-        "PART I – FOUNDATIONS OF TRAUMA & EMDR\n"
-        "Chapter 1: Understanding the Roots of Emotional Wounds\n"
-        "How trauma hides in plain sight\n"
-        "The biology of stuck processing\n"
+        "PART I – FOUNDATIONS\n"
+        "Chapter 1: Understanding the Basics\n"
+        "How X hides in plain sight\n"
+        "The biology of Y\n"
     ),
 )
 
 gen_btn = st.button("🚀 Generate", type="primary", use_container_width=True)
 
-# ---------- Helpers ----------
+# --------------------- Helpers ------------------------
 def safe_title_for_filename(s: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]+', "-", s).strip()
+    return re.sub(r'[\\/:*?"<>|]+', '-', s).strip()
 
 def parse_toc_lines(toc_text: str):
     """
-    Converte una TOC incollata (testo semplice) in una lista per book.yaml:
-    - Linee in MAIUSCOLO (es. INTRODUCTION, PART I …) o che iniziano con 'Chapter'/'Day'
-      => diventano capitoli.
-    - Le linee successive, finché non arriva un nuovo capitolo, sono sottosezioni.
-    - Le righe vuote vengono ignorate.
+    Convert simple pasted TOC to a chapters list usable by book.yaml.
+
+    Rules:
+    - Lines in ALL CAPS (INTRODUCTION, PART I ...) or starting with 'Chapter/Day N'
+      -> start a new chapter.
+    - Following lines until the next chapter -> subsections.
+    - Empty lines ignored.
     """
     lines = [ln.strip(" \t-•").rstrip() for ln in toc_text.splitlines()]
-    lines = [ln for ln in lines if ln]  # no vuoti
+    lines = [ln for ln in lines if ln]  # drop empties
 
     chapters = []
     cur = None
@@ -82,17 +88,18 @@ def parse_toc_lines(toc_text: str):
             cur = {"title": ln, "subs": []}
         else:
             if not cur:
-                cur = {"title": "Chapter", "subs": []}
+                cur = {"title": "Introduction", "subs": []}
             cur["subs"].append(ln)
 
     if cur:
         chapters.append(cur)
+
     return chapters
 
 def write_book_yaml_locally(title: str, persona: str, chapters_list: list) -> Path:
     """
-    Scrive un book.yaml minimale per il backend esistente (bookgen.main).
-    Nota: yaml.safe_load accetta perfettamente JSON, quindi scriviamo JSON valido.
+    Write a minimal book.yaml expected by bookgen/main.py.
+    Uses JSON syntax that yaml.safe_load will read fine.
     """
     data = {
         "title": title,
@@ -104,74 +111,71 @@ def write_book_yaml_locally(title: str, persona: str, chapters_list: list) -> Pa
     return p
 
 def find_output_doc(title: str, run_id: str) -> Path | None:
-    safe_title = safe_title_for_filename(title)
-    p = Path("output") / f"BOOK - {safe_title} - {run_id}.docx"
+    safe = safe_title_for_filename(title)
+    p = Path("output") / f"BOOK - {safe} - {run_id}.docx"
     return p if p.exists() else None
 
 def import_bookgen_main():
     """
-    Import robusto di bookgen.main, assicurando che la root del repo sia nel PYTHONPATH.
+    Dynamically import bookgen.main after env + book.yaml are ready.
+    Ensures project root is on sys.path.
     """
-    root = pathlib.Path(__file__).parent
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    try:
-        return importlib.import_module("bookgen.main")
-    except Exception:
-        st.error("Import error: cannot load module `bookgen.main`. Check that `bookgen/main.py` exists.")
-        st.code(traceback.format_exc())
-        st.stop()
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    return importlib.import_module("bookgen.main")
 
-# ---------- Action ----------
+# --------------------- Action -------------------------
 if gen_btn:
-    # Validazioni minime
+    # Basic validations
     if not title.strip():
-        st.error("Please enter a Title.")
+        st.error("Please enter a Title / Inserisci un Titolo.")
         st.stop()
     if not persona.strip():
-        st.error("Please paste the Buyer persona / Voice & Style.")
+        st.error("Please paste the Buyer persona / Incolla la persona.")
         st.stop()
     if not toc_text.strip():
-        st.error("Please paste the Table of Contents.")
+        st.error("Please paste the TOC / Incolla l'indice.")
         st.stop()
 
-    # Verifica OPENAI_API_KEY nei secrets
-    if "OPENAI_API_KEY" not in st.secrets or not st.secrets["OPENAI_API_KEY"]:
+    # OPENAI_API_KEY must be set via Streamlit Secrets
+    api_key = st.secrets.get("OPENAI_API_KEY", "")
+    if not api_key:
         st.error("Missing OPENAI_API_KEY in Streamlit Secrets.")
+        st.info("In Streamlit Cloud: Manage app → Settings → Secrets.")
         st.stop()
 
-    # Prepara env per il backend
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-    if "BOOK_MODEL" in st.secrets and st.secrets["BOOK_MODEL"]:
-        os.environ["BOOK_MODEL"] = st.secrets["BOOK_MODEL"]
+    # Prepare environment for backend
+    os.environ["OPENAI_API_KEY"] = api_key
+    model = st.secrets.get("BOOK_MODEL", "")
+    if model:
+        os.environ["BOOK_MODEL"] = model
 
-    # Forziamo un RUN_ID riproducibile per recuperare il file
+    # Fresh RUN_ID for unique filename
     run_id = time.strftime("%Y%m%d-%H%M%S")
     os.environ["BOOK_RUN_ID"] = run_id
 
-    # Parsing TOC → book.yaml temporaneo
+    # Build book.yaml
     chapters_parsed = parse_toc_lines(toc_text)
     write_book_yaml_locally(title, persona, chapters_parsed)
 
-with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
-import sys, importlib, pathlib
+    # Generate
+    with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
+        try:
+            bookgen_main = import_bookgen_main()
 
-ROOT = pathlib.Path(__file__).parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+            # Optional clamp to ~500–600 words per subsection
+            try:
+                bookgen_main.MIN_SUBSECTION_WORDS = 520
+            except Exception:
+                pass
 
-bookgen_main = importlib.import_module("bookgen.main")
+            bookgen_main.main()
+        except Exception as e:
+            st.error("Generation crashed. See logs on the right (or Manage app → Logs).")
+            st.exception(e)
+            st.stop()
 
-
-    try:
-        bookgen_main.MIN_SUBSECTION_WORDS = 520
-    except Exception:
-        pass
-
-    bookgen_main.main()
-
-
-    # Recupero file e offro il download
+    # Serve .docx
     out_path = find_output_doc(title, run_id)
     if not out_path:
         st.error("Generation finished but output file was not found. Check logs.")
@@ -186,4 +190,4 @@ bookgen_main = importlib.import_module("bookgen.main")
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         use_container_width=True,
     )
-    st.caption(f"Saved also on server: `{out_path}`")
+    st.caption(f"Saved on server: `{out_path}`")
