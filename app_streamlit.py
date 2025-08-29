@@ -1,129 +1,162 @@
-import os, io, time, tempfile, shutil
-from pathlib import Path
+# app_streamlit.py
+import os, re, yaml, io
 from datetime import datetime
-
+from pathlib import Path
 import streamlit as st
 
-# Importa il tuo motore: bookgen/main.py (quello che già usi da terminale)
-# NB: deve esistere bookweb/bookgen/main.py e bookweb/bookgen/__init__.py
-from bookgen import main as bookgen_main
+# importa il tuo generatore
+from bookgen import main as bookgen_main  # usa bookgen/main.py del tuo repo
 
-# ------------- UI -------------
+# ---------- UTIL ----------
+def safe_title(t: str) -> str:
+    return re.sub(r'[\\/:*?"<>|]+', '-', t).strip()
+
+def parse_toc_text(toc_text: str):
+    """
+    Accetta TOC incollata a righe:
+    - Riga senza indentazione = Capitolo
+    - Righe con 2+ spazi davanti = Sottosezioni del capitolo precedente
+    Righe vuote/whitespace ignorate.
+    Ritorna la struttura che si aspetta book.yaml:
+      [{'Chapter': ['Sub1','Sub2']}, 'Chapter without subs', ...]
+    """
+    chapters = []
+    current = None
+    for raw in toc_text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if re.match(r"^\s{2,}", line):  # subheading
+            if current is None:
+                continue
+            sub = line.strip()
+            if isinstance(chapters[-1], dict):
+                key = next(iter(chapters[-1].keys()))
+                chapters[-1][key].append(sub)
+            else:
+                # se l'ultimo era stringa, converti a dict
+                prev = chapters.pop()
+                chapters.append({prev: [sub]})
+        else:
+            # chapter
+            if current and isinstance(chapters[-1], dict):
+                pass
+            chapters.append(line.strip())
+            current = line.strip()
+    return chapters
+
+def build_yaml_dict(title: str, persona: str, toc_list):
+    return {
+        "title": title.strip(),
+        "persona": persona.strip(),
+        # NB: il MASTER PROMPT ora è dentro main.py; non serve nel YAML
+        "toc": toc_list
+    }
+
+# ---------- UI ----------
 st.set_page_config(page_title="Book Generator", page_icon="📘", layout="centered")
+
 st.title("📘 Book Generator (Streamlit)")
 
-st.markdown(
-    "Carica il tuo **book.yaml** e inserisci la tua **OPENAI_API_KEY**. "
-    "Clicca *Generate* e scarica il .docx."
-)
+st.caption("Incolla **Titolo**, **Persona** e **TOC**. L’app userà le tue **Streamlit Secrets** per l’OpenAI API Key.")
 
-col1, col2 = st.columns(2)
+# Stato segreti
+has_key = "OPENAI_API_KEY" in st.secrets
+st.info("OPENAI_API_KEY configurata nei *Secrets* ✅" if has_key else "⚠️ Aggiungi OPENAI_API_KEY nei *Secrets* dell’app.")
+
+col1, col2 = st.columns([1,1])
 with col1:
-    yaml_file = st.file_uploader("book.yaml", type=["yaml", "yml"])
+    title = st.text_input("Title", placeholder="Es. The EMDR Therapist’s Complete Blueprint", max_chars=250)
 with col2:
-    api_key = st.text_input("OPENAI_API_KEY", type="password", placeholder="sk-...")
+    st.text_input("Model (opzionale, da Secrets BOOK_MODEL)", value=st.secrets.get("BOOK_MODEL", ""), disabled=True)
 
-st.divider()
-
-st.subheader("Opzioni (facoltative)")
-run_id = st.text_input(
-    "RUN_ID (per avere un nome file unico; vuoto = timestamp)",
-    value=""
-).strip()
-
-mini_mode = st.selectbox(
-    "Stile mini-headings (se il modello li crea)",
-    options=["bullet", "bold"],
-    index=0,
-    help="bullet → • **Titolo** — testo | bold → **Titolo.** testo"
+persona = st.text_area(
+    "Buyer persona / Voice & Style",
+    height=220,
+    placeholder="Incolla qui la persona (target, tono, must/avoid,...)."
 )
 
-min_words = st.slider(
-    "Lunghezza minima per sottosezione (parole)",
-    min_value=400, max_value=800, value=550, step=50,
-    help="Tu avevi chiesto 500–600 parole; qui imposti la soglia minima."
+toc_text = st.text_area(
+    "Table of Contents (incolla semplice testo)",
+    height=280,
+    placeholder=("Esempio:\n"
+                 "INTRODUCTION\n"
+                 "  How to Use This Book for Real Clinical Impact\n"
+                 "  A Note on Ethics and Client Safety\n\n"
+                 "PART I – FOUNDATIONS OF TRAUMA & EMDR\n"
+                 "  Chapter 1: Understanding the Roots of Emotional Wounds\n"
+                 "    How trauma hides in plain sight\n"
+                 "    The biology of stuck processing\n")
 )
 
-st.caption("Il resto (font, margini, spacing) lo imposta già il tuo main.py.")
+generate = st.button("🚀 Generate", use_container_width=True)
 
-# ------------- ACTION -------------
-generate = st.button("🚀 Generate", type="primary", use_container_width=True)
-
+# ---------- ACTION ----------
 if generate:
-    if not yaml_file:
-        st.error("Carica un file book.yaml.")
+    # Validazioni minime
+    if not has_key:
+        st.error("Configura l’OPENAI_API_KEY nei *Secrets* (Settings → Secrets).")
         st.stop()
-    if not api_key:
-        st.error("Inserisci la OPENAI_API_KEY.")
+    if not title.strip():
+        st.error("Inserisci il Title.")
+        st.stop()
+    if not toc_text.strip():
+        st.error("Incolla la TOC.")
         st.stop()
 
-    # 1) Prepara una cartella temporanea di lavoro
-    with st.spinner("Preparazione ambiente..."):
-        tmpdir = Path(tempfile.mkdtemp(prefix="bookweb-"))
-        workdir = tmpdir
-        # Scrivi il book.yaml caricato
-        yaml_path = workdir / "book.yaml"
-        yaml_path.write_bytes(yaml_file.read())
+    # Prepara env: API key + opzionale BOOK_MODEL
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+    if "BOOK_MODEL" in st.secrets and st.secrets["BOOK_MODEL"]:
+        os.environ["BOOK_MODEL"] = st.secrets["BOOK_MODEL"]
 
-        # Copia la tua cartella bookgen nel tmp (così non tocchi i file originali)
-        src = Path(__file__).parent / "bookgen"
-        dst = workdir / "bookgen"
-        shutil.copytree(src, dst)
+    # RUN_ID automatico (timestamp) per nome file univoco
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    os.environ["BOOK_RUN_ID"] = run_id
 
-    # 2) Configura variabili d’ambiente per il run
-    os.environ["OPENAI_API_KEY"] = api_key
-    os.environ["MINI_HEADING_MODE"] = mini_mode
-    if run_id:
-        os.environ["BOOK_RUN_ID"] = run_id
-    else:
-        os.environ["BOOK_RUN_ID"] = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Opzioni interne: niente UI per mini-headings o word count
+    # (si usano i default già messi nel tuo main.py)
+    # Se vuoi forzarli qui via secrets, decommenta:
+    # os.environ["MINI_HEADING_MODE"] = st.secrets.get("MINI_HEADING_MODE", "bullet")
+    # os.environ["SUBSECTION_MIN_WORDS"] = st.secrets.get("SUBSECTION_MIN_WORDS", "550")
 
-    # 3) Monkey-patch di alcuni parametri nel tuo main (solo per questa sessione)
-    #    - Sposta il puntamento del BOOK_YAML sul file appena caricato
-    #    - Imposta la soglia minima parole che vuoi (es. 500–600)
-    #    - Resetta l’eventuale checkpoint
-    try:
-        bookgen_main.BOOK_YAML = yaml_path
-    except Exception:
-        pass
+    # Costruisci YAML temporaneo per compat con bookgen.main
+    toc_list = parse_toc_text(toc_text)
+    cfg = build_yaml_dict(title, persona, toc_list)
 
-    try:
-        bookgen_main.MIN_SUBSECTION_WORDS = int(min_words)
-    except Exception:
-        pass
+    # Scrivi book.yaml nella working dir (bookgen/main.py lo legge da Path('book.yaml'))
+    with open("book.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 
-    # 4) Esegui la generazione
-    st.info("Generazione in corso. Può richiedere qualche minuto…")
-    start = time.time()
-    try:
-        # È importante eseguire nel working dir temporaneo
-        os.chdir(workdir)
-        bookgen_main.main()
-    except Exception as e:
-        st.exception(e)
-        st.stop()
-    finally:
-        os.chdir(Path(__file__).parent)
+    st.write("✅ TOC parsata:", toc_list)
 
-    elapsed = time.time() - start
-    st.success(f"Fatto in {int(elapsed)}s.")
+    with st.spinner("Generating .docx..."):
+        # esegui il generatore
+        try:
+            bookgen_main.main()
+        except Exception as e:
+            st.exception(e)
+            st.stop()
 
-    # 5) Trova l’ultimo .docx generato e offri il download
-    out_dir = workdir / "output"
-    docx_files = sorted(out_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not docx_files:
-        st.error("Nessun .docx trovato in output/ — qualcosa è andato storto.")
-    else:
-        latest = docx_files[0]
-        st.write("File generato:")
-        st.code(str(latest.name))
-        with open(latest, "rb") as f:
+    # Trova il file .docx generato
+    out_dir = Path("output")
+    expected = out_dir / f"BOOK - {safe_title(title)} - {run_id}.docx"
+    if expected.exists():
+        with open(expected, "rb") as f:
+            st.success("✅ Documento generato!")
             st.download_button(
-                label="⬇️ Scarica DOCX",
+                label="⬇️ Download .docx",
                 data=f.read(),
-                file_name=latest.name,
+                file_name=expected.name,
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
             )
-
-    st.caption("La cartella temporanea verrà eliminata automaticamente dal sistema.")
+    else:
+        # fallback: mostra lista dei docx presenti
+        st.warning("File atteso non trovato. Mostro i .docx presenti in /output.")
+        files = list(out_dir.glob("*.docx"))
+        if files:
+            for p in files:
+                with open(p, "rb") as f:
+                    st.download_button(f"Scarica {p.name}", f.read(), file_name=p.name)
+        else:
+            st.error("Nessun .docx trovato.")
