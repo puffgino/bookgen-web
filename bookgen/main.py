@@ -32,38 +32,24 @@ RUN_ID = os.getenv("BOOK_RUN_ID") or datetime.now().strftime("%Y%m%d-%H%M%S")
 
 # ===== MASTER PROMPT (global, reused for all books) =====
 MASTER_PROMPT = """
-The “Book Writer” must assist the user in generating high-quality book content.
-It should follow a well-structured flow, maintain smooth and coherent writing,
-and avoid unnecessary repetition. Always write in clear and understandable English.
+You are a book-writing assistant.  
+Your job is to generate high-quality book content that follows the provided Table of Contents.  
 
-Before generating any content, the user will provide:
-- The title of the book
-- The complete Table of Contents
-- A detailed buyer persona analysis (ideal reader, needs, desires, pain points)
-- Tone of voice and style instructions
-- Clear guidelines on what to include, what to avoid, structure, and transformation
+Rules:  
+1) Follow the TOC exactly; do not invent extra chapters or headings.  
+2) For each subheading, write ~500–600 words of complete, on-topic content.  
+3) Avoid repetition; each sentence must add new value.  
+4) Stay strictly on-topic for each subheading.  
+5) Ensure smooth flow and coherence across paragraphs.  
+6) Never use placeholders or meta comments.  
+7) No decorative separators (—, ***, etc.).  
+8) Do not restate “Chapter/Day …” or the subheading line inside the body.  
 
-Rules:
-1) Follow the provided TOC exactly; do not invent new chapters or headings.
-2) For each subheading, write ~700–800 words of complete, on-topic content.
-3) Avoid repetition; each sentence must add new value.
-4) Maintain a professional yet accessible, human tone; never academic.
-5) Prefer short sentences and short paragraphs; stay clear and concrete.
-6) Do not drift off-topic; stick closely to the subheading.
-7) Smooth transitions, but concise; keep the reader engaged.
-8) Do not reduce quality or length in later sections.
+Global quality:  
+- Each section must feel complete, rich, and useful.  
+- Maintain consistent length and depth across the entire book.  
+- The output must be copy-paste ready.  
 
-Formatting rules:
-- Start directly with prose (no “here is your section”).
-- No decorative lines (—, ***). No placeholder text.
-- Use bold sparingly (≤ 8 words); never bold whole sentences/paragraphs.
-- Do not restate “Chapter/Day …” or the subheading line inside the body.
-
-Global quality:
-- Keep accuracy, length, and richness consistent from start to finish.
-- No lazy summarizing. Every section must feel complete and useful.
-- The output must be copy-paste ready.
-"""
 # ====================================================
 
 client = OpenAI()
@@ -258,17 +244,13 @@ ANGLE TO ADOPT (one sentence):
 {mem.get("angle") or 'Offer a concrete, fresh angle with specific examples.'}
 
 STYLE CLAMP (MANDATORY):
-- Warm, friendly, supportive; never academic.
-- Short sentences (≤ 18 words). Short paragraphs (≤ 4 sentences).
-  Never add new Markdown/heading levels in the body.
-- Bold **only** short key phrases (≤ 8 words), never entire lines/paragraphs.
-- Do NOT restate the chapter/subheading lines inside the body. Start directly with prose.
-- No placeholders (e.g. "(to be added later)"), no emojis, no meta talk.
-- Write in continuous prose, not broken into many headings.
-- Do NOT invent sub-sub-headings unless truly necessary for clarity.
-- If you want to highlight 2–3 key ideas, use a compact bulleted list or bold phrases embedded in the paragraph.
-- The text must read like a flowing book chapter, not lecture notes.
-- Each subheading MUST produce ~700–800 words of prose. Never skip or merge subheadings even if they overlap; bring a NEW example or angle.
+- Follow the TOC exactly; never invent new headings.
+- No placeholders or meta talk.
+- No Markdown headings in the body.
+- Bold only short key phrases (≤ 8 words).
+- Write continuous prose, not broken into many headings.
+- Each subheading MUST produce ~700–800 words of prose.
+- Never skip or merge subheadings, even if they overlap; bring a NEW example or angle.
 
 --- BOOK CONTEXT ---
 Title: {title}
