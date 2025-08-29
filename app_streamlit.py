@@ -5,31 +5,29 @@ import time
 import json
 import sys
 import importlib
-import pathlib
 from pathlib import Path
 
 import streamlit as st
 
 APP_TITLE = "Book Generator (Streamlit)"
-ROOT = pathlib.Path(__file__).parent
+ROOT = Path(__file__).parent
 
-# ------------------------- PAGE & STATE -------------------------
+
+# ======================= UI =======================
 st.set_page_config(page_title=APP_TITLE, page_icon="📘", layout="centered")
 st.title(APP_TITLE)
-st.caption("Paste Title, Buyer persona / Voice & Style, and Table of Contents. Click Generate to download the .docx.")
+st.caption(
+    "Paste **Title**, **Buyer persona / Voice & Style**, and **Table of Contents**. "
+    "Click **Generate** to download the .docx."
+)
 
+# Session flags
 if "running" not in st.session_state:
     st.session_state.running = False
+if "last_file" not in st.session_state:
+    st.session_state.last_file = None
 
-col_a, col_b = st.columns([1,1])
-with col_a:
-    st.write(f"🟢 Running flag: **{st.session_state.running}**")
-with col_b:
-    if st.button("🧹 Reset state"):
-        st.session_state.running = False
-        st.toast("State reset.", icon="✅")
-
-# ------------------------- UI -------------------------
+# Inputs
 title = st.text_input(
     "Title / Titolo",
     placeholder="e.g., Super Easy Options Trading for Absolute Beginners",
@@ -59,27 +57,30 @@ toc_text = st.text_area(
     ),
 )
 
-gen_btn = st.button("🚀 Generate", type="primary", use_container_width=True)
+colA, colB = st.columns([1, 1])
+gen_clicked = colA.button("🚀 Generate", type="primary", use_container_width=True)
+reset_clicked = colB.button("↩️ Reset state", use_container_width=True)
 
-# ------------------------- HELPERS -------------------------
+
+# =================== Helpers ===================
 def safe_title_for_filename(s: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]+', '-', s).strip()
+    return re.sub(r'[\\/:*?"<>|]+', "-", s).strip()
+
 
 def parse_toc_lines(toc_text: str):
     """
-    Convert simple pasted TOC into a chapters list for book.yaml.
+    Convert simple pasted TOC to chapters usable by book.yaml.
 
     Rules:
-    - Lines in ALL CAPS (INTRODUCTION, PART I ...) or starting with 'Chapter/Day N'
-      start a new chapter.
-    - Following lines until the next chapter => subsections.
+    - Lines in ALL CAPS (INTRODUCTION, PART I …) or starting with 'Chapter/Day N'
+      -> start a new chapter.
+    - Following lines until the next chapter -> subsections.
     - Empty lines ignored.
     """
     lines = [ln.strip(" \t-•").rstrip() for ln in toc_text.splitlines()]
     lines = [ln for ln in lines if ln]  # drop empties
 
-    chapters = []
-    cur = None
+    chapters, cur = [], None
 
     def is_chapter(ln: str) -> bool:
         if re.match(r"^(chapter|day)\s+\d+[:\- ]", ln, flags=re.I):
@@ -106,11 +107,9 @@ def parse_toc_lines(toc_text: str):
 
     return chapters
 
+
 def write_book_yaml_locally(title: str, persona: str, chapters_list: list) -> Path:
-    """
-    Write a minimal book.yaml expected by bookgen/main.py.
-    Uses JSON text that yaml.safe_load will read fine.
-    """
+    """Write a minimal book.yaml expected by bookgen/main.py (JSON is OK for yaml.safe_load)."""
     data = {
         "title": title,
         "persona": persona,
@@ -120,25 +119,25 @@ def write_book_yaml_locally(title: str, persona: str, chapters_list: list) -> Pa
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return p
 
+
 def find_output_doc(title: str, run_id: str) -> Path | None:
     safe = safe_title_for_filename(title)
     p = Path("output") / f"BOOK - {safe} - {run_id}.docx"
     return p if p.exists() else None
 
+
 def import_bookgen_main():
-    """
-    Dynamically import bookgen.main after env + book.yaml are ready.
-    Ensures project root is on sys.path.
-    """
+    """Import bookgen.main only after env + book.yaml are ready."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     return importlib.import_module("bookgen.main")
 
-# ------------------------- ACTION -------------------------
-gen_clicked = gen_btn  # leggo il click subito
 
-if gen_clicked:
-    st.toast("Generate clicked.", icon="🚀")
+# =================== Actions ===================
+if reset_clicked and not st.session_state.running:
+    st.session_state.last_file = None
+    st.success("State reset.")
+    st.rerun()
 
 if gen_clicked and not st.session_state.running:
     st.session_state.running = True
@@ -146,51 +145,67 @@ if gen_clicked and not st.session_state.running:
         # ---- Validations
         if not title.strip():
             st.error("Please enter a Title / Inserisci un Titolo.")
-            return
+            st.session_state.running = False
+            st.stop()
+
         if not persona.strip():
             st.error("Please paste the Buyer persona / Incolla la persona.")
-            return
+            st.session_state.running = False
+            st.stop()
+
         if not toc_text.strip():
             st.error("Please paste the TOC / Incolla l'indice.")
-            return
+            st.session_state.running = False
+            st.stop()
 
         # ---- Secrets
         api_key = st.secrets.get("OPENAI_API_KEY", "")
         if not api_key:
             st.error("Missing OPENAI_API_KEY in Streamlit Secrets.")
             st.info("In Streamlit Cloud: Manage app → Settings → Secrets.")
-            return
+            st.session_state.running = False
+            st.stop()
 
-        # ---- Env for backend
+        # Prepare env for backend
         os.environ["OPENAI_API_KEY"] = api_key
         model = st.secrets.get("BOOK_MODEL", "")
         if model:
             os.environ["BOOK_MODEL"] = model
 
-        # ---- Unique filename
+        # Unique RUN_ID for filename
         run_id = time.strftime("%Y%m%d-%H%M%S")
         os.environ["BOOK_RUN_ID"] = run_id
 
-        # ---- Build book.yaml
+        # Build book.yaml
         chapters_parsed = parse_toc_lines(toc_text)
         write_book_yaml_locally(title, persona, chapters_parsed)
 
-        # ---- Generate
+        # Generate
         with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
-            bookgen_main = import_bookgen_main()
             try:
-                bookgen_main.MIN_SUBSECTION_WORDS = 520
-            except Exception:
-                pass
-            bookgen_main.main()
+                bookgen_main = import_bookgen_main()
+                # Optional clamp to ~500–600 words per subsection
+                try:
+                    bookgen_main.MIN_SUBSECTION_WORDS = 520
+                except Exception:
+                    pass
+                bookgen_main.main()
+            except Exception as e:
+                st.error("Generation crashed. See logs on the right (or Manage app → Logs).")
+                st.exception(e)
+                st.session_state.running = False
+                st.stop()
 
-        # ---- Serve .docx
+        # Serve .docx
         out_path = find_output_doc(title, run_id)
         if not out_path:
             st.error("Generation finished but output file was not found. Check logs.")
-            return
+            st.session_state.running = False
+            st.stop()
 
         data = out_path.read_bytes()
+        st.session_state.last_file = out_path.name  # remember last file
+
         st.success("Done! Click below to download your book.")
         st.download_button(
             label="📥 Download .docx",
@@ -201,8 +216,19 @@ if gen_clicked and not st.session_state.running:
         )
         st.caption(f"Saved on server: `{out_path}`")
 
-    except Exception as e:
-        st.error("Generation crashed. See logs on the right (or Manage app → Logs).")
-        st.exception(e)
     finally:
+        # release the lock so user can run again
         st.session_state.running = False
+
+# If a file was already produced in this session, show download again
+if st.session_state.last_file:
+    hint = Path("output") / st.session_state.last_file
+    if hint.exists():
+        st.info("Last generated file:")
+        st.download_button(
+            label="📥 Re-download last .docx",
+            data=hint.read_bytes(),
+            file_name=hint.name,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
