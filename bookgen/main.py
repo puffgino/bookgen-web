@@ -37,7 +37,7 @@ Your job is to generate high-quality book content that follows the provided Tabl
 
 Rules:  
 1) Follow the TOC exactly; do not invent extra chapters or headings.  
-2) For each subheading, write ~500–600 words of complete, on-topic content.  
+2) For each subheading, write ~500-600 words of complete, on-topic content.  
 3) Avoid repetition; each sentence must add new value.  
 4) Stay strictly on-topic for each subheading.  
 5) Ensure smooth flow and coherence across paragraphs.  
@@ -199,7 +199,7 @@ SECTION:
 
 Format:
 SUMMARY:
-<one paragraph 120–180 words>
+<one paragraph 120-180 words>
 
 CLAIMS:
 - <sentence 1>
@@ -249,7 +249,7 @@ STYLE CLAMP (MANDATORY):
 - No Markdown headings in the body.
 - Bold only short key phrases (≤ 8 words).
 - Write continuous prose, not broken into many headings.
-- Each subheading MUST produce ~700–800 words of prose.
+- Each subheading MUST produce ~700-800 words of prose.
 - Never skip or merge subheadings, even if they overlap; bring a NEW example or angle.
 
 --- BOOK CONTEXT ---
@@ -262,7 +262,7 @@ CURRENT CHAPTER: {chapter}
 CURRENT SUBHEADING: {sub}
 
 OUTPUT:
-- Write ~500–600 words of rich, specific content for THIS subheading only.
+- Write ~500-600 words of rich, specific content for THIS subheading only.
 - End cleanly with prose, then on a new line output exactly: {END_MARK}
 """
 
@@ -292,7 +292,7 @@ GLOBAL CHAPTER LIST:
 CURRENT CHAPTER (no subheadings): {chapter}
 
 OUTPUT:
-- Write ~2,000–3,000 words of continuous, engaging prose.
+- Write ~2,000-3,000 words of continuous, engaging prose.
 - End cleanly with prose, then on a new line output exactly: {END_MARK}
 """
 
@@ -509,7 +509,7 @@ def main():
             if not out_text:
                 force_prompt = f"""{subheading_prompt(MASTER_PROMPT, persona, title, chapters_list, ch["title"], sub, mem)}
 IMPORTANT:
-- Your previous attempt was too short. Produce a FULL 700–800 words now.
+- Your previous attempt was too short. Produce a FULL 700-800 words now.
 - If content overlaps previous sections, add NEW case examples, therapist language, checklists or scripts.
 - Absolutely NO headings; continuous prose only."""
                 raw = call_openai(force_prompt, SUBSECTION_TOKENS)
