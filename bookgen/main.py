@@ -50,7 +50,6 @@ Rules:
 Global quality:
 - Each section must feel complete, rich, and useful.
 - Maintain consistent length and depth across the entire book.
-- The output must be copy-paste ready.
 """
 
 # ====================================================
@@ -247,44 +246,45 @@ END_MARK = "<<<END_OF_SUBHEADING>>>"
 def subheading_prompt(master, persona, title, chapters_list, chapter, sub, mem):
     claims_list = "\n".join(f"- {c}" for c in (mem.get("claims") or [])[:7]) or "- (none)"
     return f"""
-You are an expert ghostwriter.
+You are an expert ghostwriter. Write this section of the book with strict adherence to the following instructions.
 
---- MASTER PROMPT (DO NOT OUTPUT) ---
-{master}
+PRIMARY INSTRUCTION (OVERRIDES EVERYTHING ELSE):
+Always write in the exact tone, style, and perspective described below. 
+This buyer persona and style guide is your voice — treat it as the single source of truth. 
+If anything in other rules conflicts, the buyer persona instructions win.
 
---- BUYER PERSONA & STYLE (DO NOT OUTPUT) ---
+BUYER PERSONA & STYLE:
 {persona}
 
-CONTEXT SUMMARY (DO NOT OUTPUT; do not repeat verbatim):
-{mem.get("summary") or '(none)'}
+---
 
-ALREADY COVERED CLAIMS (avoid repeating; if similar theme, add a new angle):
-{claims_list}
-
-ANGLE TO ADOPT (one sentence):
-{mem.get("angle") or 'Offer a concrete, fresh angle with specific examples.'}
-
-STYLE CLAMP (MANDATORY):
-- Follow the TOC exactly; never invent new headings.
-- No placeholders or meta talk.
-- No Markdown headings in the body.
-- Bold only short key phrases (<= 8 words).
-- Write continuous prose, not broken into many headings.
-- Each subheading MUST produce about 500-600 words of prose.
-- Never skip or merge subheadings, even if they overlap; bring a NEW example or angle.
-
---- BOOK CONTEXT ---
-Title: {title}
-
-GLOBAL CHAPTER LIST:
+CONTEXT (for your awareness, not rules):
+Book title: {title}
+Global TOC:
 {chapters_list}
+Current chapter: {chapter}
+Current subheading: {sub}
 
-CURRENT CHAPTER: {chapter}
-CURRENT SUBHEADING: {sub}
+Previously covered (avoid repeating verbatim):
+Summary so far: {mem.get("summary") or '(none)'}
+Claims so far: {claims_list}
+Angle to adopt: {mem.get("angle") or 'Offer a concrete, fresh angle with specific examples.'}
+
+---
+
+WRITING RULES (these apply *in addition* to the buyer persona above):
+1. Follow the Table of Contents exactly; do not invent or skip headings.
+2. Write ~500–600 words of complete, specific content for THIS subheading only.
+3. Stay strictly on-topic, avoid filler or vague language.
+4. Use smooth transitions so it reads like a flowing book chapter.
+5. Never use placeholders, meta comments, or decorative separators (---, ***).
+6. Do not restate the subheading or write “Chapter/Day …” in the body.
+7. Use **bold** sparingly (max 8 words, never entire lines/paragraphs).
+8. If ideas overlap with earlier sections, bring a *new example, case, or perspective*.
 
 OUTPUT:
-- Write 500-600 words of rich, specific content for THIS subheading only.
-- End cleanly with prose, then on a new line output exactly: {END_MARK}
+- Produce only the body text for this subheading.
+- End cleanly with prose, then output exactly this on a new line: <<<END_OF_SUBHEADING>>>
 """
 
 def chapter_only_prompt(master, persona, title, chapters_list, chapter):
