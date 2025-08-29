@@ -141,7 +141,7 @@ if gen_btn:
     # Avvia generazione usando il backend esistente
     with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
         # Import QUI (dopo che env e file sono pronti)
-        from bookgen import main as bookgen_main
+        # --- robust local import of bookgen.main --- import sys, importlib, pathlib ROOT = pathlib.Path(__file__).parent if str(ROOT) not in sys.path:  # assicura che la root del repo sia nel PYTHONPATH     sys.path.insert(0, str(ROOT)) bookgen_main = importlib.import_module("bookgen.main") # -------------------------------------------
 
         # (opzionale) forziamo lunghezza minima sottosezioni a 500—600
         try:
