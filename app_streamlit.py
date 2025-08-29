@@ -126,43 +126,44 @@ if submitted:
     st.session_state.running = True
 
     try:
-        # Validations
+        # ---- Validations
         if not title.strip():
             st.error("Please enter a Title / Inserisci un Titolo.")
             st.stop()
+
         if not persona.strip():
             st.error("Please paste the Buyer persona / Incolla la persona.")
             st.stop()
+
         if not toc_text.strip():
             st.error("Please paste the TOC / Incolla l'indice.")
             st.stop()
 
-        # Secrets
+        # ---- Secrets
         api_key = st.secrets.get("OPENAI_API_KEY", "")
         if not api_key:
             st.error("Missing OPENAI_API_KEY in Streamlit Secrets.")
             st.info("Streamlit Cloud → Manage app → Settings → Secrets.")
             st.stop()
 
-        # Prepare env for backend (unchanged behaviour)
+        # ---- Env
         os.environ["OPENAI_API_KEY"] = api_key
         model = st.secrets.get("BOOK_MODEL", "")
         if model:
             os.environ["BOOK_MODEL"] = model
 
-        # RUN_ID + book.yaml
+        # ---- Build book.yaml
         run_id = time.strftime("%Y%m%d-%H%M%S")
         os.environ["BOOK_RUN_ID"] = run_id
         chapters_parsed = parse_toc_lines(toc_text)
         write_book_yaml_locally(title, persona, chapters_parsed)
 
-        # Generate
+        # ---- Generate
         with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
             bookgen_main = import_bookgen_main()
-            # Non tocchiamo MIN_SUBSECTION_WORDS / TOKENS / TRIES
             bookgen_main.main()
 
-        # Serve .docx
+        # ---- Serve .docx
         out_path = find_output_doc(title, run_id)
         if not out_path:
             st.error("Generation finished but output file was not found. Check logs.")
@@ -186,5 +187,4 @@ if submitted:
             st.error("Generation crashed. See logs (Manage app → Logs).")
             st.exception(e)
     finally:
-        # rilascia sempre il flag (anche su errore)
         st.session_state.running = False
