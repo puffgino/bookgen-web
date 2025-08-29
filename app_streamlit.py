@@ -158,22 +158,39 @@ if gen_btn:
     chapters_parsed = parse_toc_lines(toc_text)
     write_book_yaml_locally(title, persona, chapters_parsed)
 
-    # Generate
-    with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
+# Generate
+with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
+    try:
+        bookgen_main = import_bookgen_main()
+
+        # Optional clamp to ~500–600 words per subsection
         try:
-            bookgen_main = import_bookgen_main()
+            bookgen_main.MIN_SUBSECTION_WORDS = 520
+        except Exception:
+            pass
 
-            # Optional clamp to ~500–600 words per subsection
-            try:
-                bookgen_main.MIN_SUBSECTION_WORDS = 520
-            except Exception:
-                pass
+        bookgen_main.main()
+    except Exception as e:
+        st.error("Generation crashed. See logs on the right (or Manage app → Logs).")
+        st.exception(e)
+        st.stop()
 
-            bookgen_main.main()
-        except Exception as e:
-            st.error("Generation crashed. See logs on the right (or Manage app → Logs).")
-            st.exception(e)
-            st.stop()
+# Serve .docx
+out_path = find_output_doc(title, run_id)
+if not out_path:
+    st.error("Generation finished but output file was not found. Check logs.")
+    st.stop()
+
+data = out_path.read_bytes()
+st.success("Done! Click below to download your book.")
+st.download_button(
+    label="📥 Download .docx",
+    data=data,
+    file_name=out_path.name,
+    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    use_container_width=True,
+)
+st.caption(f"Saved on server: `{out_path}`")
 
     # Serve .docx
     out_path = find_output_doc(title, run_id)
