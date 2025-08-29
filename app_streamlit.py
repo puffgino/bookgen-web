@@ -21,6 +21,14 @@ st.caption("Paste Title, Buyer persona / Voice & Style, and Table of Contents. C
 if "running" not in st.session_state:
     st.session_state.running = False
 
+col_a, col_b = st.columns([1,1])
+with col_a:
+    st.write(f"🟢 Running flag: **{st.session_state.running}**")
+with col_b:
+    if st.button("🧹 Reset state"):
+        st.session_state.running = False
+        st.toast("State reset.", icon="✅")
+
 # ------------------------- UI -------------------------
 title = st.text_input(
     "Title / Titolo",
@@ -127,23 +135,31 @@ def import_bookgen_main():
     return importlib.import_module("bookgen.main")
 
 # ------------------------- ACTION -------------------------
-if gen_btn and not st.session_state.running:
+gen_clicked = gen_btn  # leggo il click subito
+
+if gen_clicked:
+    st.toast("Generate clicked.", icon="🚀")
+
+if gen_clicked and not st.session_state.running:
     st.session_state.running = True
     try:
         # ---- Validations
         if not title.strip():
-            st.error("Please enter a Title / Inserisci un Titolo."); st.stop()
+            st.error("Please enter a Title / Inserisci un Titolo.")
+            return
         if not persona.strip():
-            st.error("Please paste the Buyer persona / Incolla la persona."); st.stop()
+            st.error("Please paste the Buyer persona / Incolla la persona.")
+            return
         if not toc_text.strip():
-            st.error("Please paste the TOC / Incolla l'indice."); st.stop()
+            st.error("Please paste the TOC / Incolla l'indice.")
+            return
 
         # ---- Secrets
         api_key = st.secrets.get("OPENAI_API_KEY", "")
         if not api_key:
             st.error("Missing OPENAI_API_KEY in Streamlit Secrets.")
             st.info("In Streamlit Cloud: Manage app → Settings → Secrets.")
-            st.stop()
+            return
 
         # ---- Env for backend
         os.environ["OPENAI_API_KEY"] = api_key
@@ -162,20 +178,17 @@ if gen_btn and not st.session_state.running:
         # ---- Generate
         with st.spinner("Generating the .docx… this can take a bit for larger TOCs."):
             bookgen_main = import_bookgen_main()
-
-            # Optional clamp to ~500–600 words per subsection
             try:
                 bookgen_main.MIN_SUBSECTION_WORDS = 520
             except Exception:
                 pass
-
             bookgen_main.main()
 
         # ---- Serve .docx
         out_path = find_output_doc(title, run_id)
         if not out_path:
             st.error("Generation finished but output file was not found. Check logs.")
-            st.stop()
+            return
 
         data = out_path.read_bytes()
         st.success("Done! Click below to download your book.")
