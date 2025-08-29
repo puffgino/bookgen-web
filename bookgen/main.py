@@ -20,7 +20,7 @@ CHAPTER_TOKENS        = int(os.getenv("CHAPTER_MAX_OUTPUT_TOKENS", "18000"))
 # Lunghezze
 TARGET_MIN_WORDS      = 500          # target minimo per sottosezione
 HARD_MIN_WORDS        = 220          # sotto questo: retry sempre
-MAX_TRIES_PER_SUB     = 5
+MAX_TRIES_PER_SUB     = 2
 
 # Mini-headings normalization: "bullet" or "bold"
 MINI_MODE = os.getenv("MINI_HEADING_MODE", "bullet").strip().lower()
