@@ -1,0 +1,4 @@
+tk
+pyyaml
+python-docx
+openai
