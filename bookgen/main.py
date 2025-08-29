@@ -12,48 +12,46 @@ from docx.oxml.ns import qn
 
 from openai import OpenAI
 
-__all__ = ["main"]
-
 # ====================== CONFIG ======================
-MODEL                = os.getenv("BOOK_MODEL", "gpt-4o")
-SUBSECTION_TOKENS    = int(os.getenv("SUBSECTION_MAX_OUTPUT_TOKENS", "7000"))
-CHAPTER_TOKENS       = int(os.getenv("CHAPTER_MAX_OUTPUT_TOKENS", "18000"))
-MIN_SUBSECTION_WORDS = 450          # target acceptance
-MIN_HARD_WORDS       = 200          # below this -> ALWAYS retry
-MAX_TRIES_PER_SUB    = 5            # more chances to avoid empty/short sections
+MODEL                 = os.getenv("BOOK_MODEL", "gpt-4o")
+SUBSECTION_TOKENS     = int(os.getenv("SUBSECTION_MAX_OUTPUT_TOKENS", "7000"))
+CHAPTER_TOKENS        = int(os.getenv("CHAPTER_MAX_OUTPUT_TOKENS", "18000"))
 
-# Mini-headings normalization style: "bullet" or "bold"
+# Lunghezze
+TARGET_MIN_WORDS      = 500          # target minimo per sottosezione
+HARD_MIN_WORDS        = 220          # sotto questo: retry sempre
+MAX_TRIES_PER_SUB     = 5
+
+# Mini-headings normalization: "bullet" or "bold"
 MINI_MODE = os.getenv("MINI_HEADING_MODE", "bullet").strip().lower()
 
 DOCS_DIR   = Path("output")
 CHECKPOINT = Path("progress.json")
 BOOK_YAML  = Path("book.yaml")
 
-# Always create a NEW file
 RUN_ID = os.getenv("BOOK_RUN_ID") or datetime.now().strftime("%Y%m%d-%H%M%S")
 
-# ===== MASTER PROMPT (global, reused for all books) =====
-MASTER_PROMPT = """
-You are a book-writing assistant.
-Your job is to generate high-quality book content that follows the provided Table of Contents.
+# ===== MASTER PROMPT (ASCII only) =====
+MASTER_PROMPT = '''
+You are a book writing assistant. Your job is to produce high quality book content
+that strictly follows the provided Table of Contents and the Buyer Persona.
 
-Rules:
-1) Follow the TOC exactly; do not invent extra chapters or headings.
-2) For each subheading, write about 500-600 words of complete, on-topic content.
-3) Avoid repetition; each sentence must add new value.
-4) Stay strictly on-topic for each subheading.
-5) Ensure smooth flow and coherence across paragraphs.
-6) Never use placeholders or meta comments.
-7) No decorative separators (---, ***, etc.).
-8) Do not restate "Chapter/Day ..." or the subheading line inside the body.
+DO NOT invent new chapters or headings. Write complete, concrete prose for each requested subheading only.
+No meta talk, no placeholders, no decorative separators, no extra headings inside the body.
 
-Global quality:
-- Each section must feel complete, rich, and useful.
-- Maintain consistent length and depth across the entire book.
-"""
+Formatting and structure rules:
+- Start directly with prose (do not repeat the heading line).
+- Keep paragraphs short (1 to 4 sentences). Keep sentences short (max about 18 words).
+- Use bold only for short key phrases (<= 8 words). Never bold whole sentences.
+- No lists unless truly needed; prefer flowing prose.
+
+Global quality goals:
+- Each section must feel useful, concrete, and ready to paste into a book.
+- Avoid repetition. Do not re-explain the same idea in the same wording.
+- Keep the same depth and length across all sections.
+'''
 
 # ====================================================
-
 client = OpenAI()
 
 # ---------------- File IO ----------------
@@ -62,7 +60,6 @@ def load_yaml(path=BOOK_YAML):
         return yaml.safe_load(f)
 
 def _set_mirror_margins(doc: Document):
-    """Turn on mirror margins in document settings (best-effort; OK if it fails)."""
     try:
         settings_part = doc._part.package.settings_part
         s = settings_part.element
@@ -70,17 +67,16 @@ def _set_mirror_margins(doc: Document):
         if node is None:
             s.append(OxmlElement('w:mirrorMargins'))
     except Exception:
-        pass  # not critical
+        pass
 
 def ensure_doc(title: str):
-    """Always create a NEW .docx with RUN_ID and set page/margin/spacing defaults."""
     DOCS_DIR.mkdir(exist_ok=True)
     safe_title = re.sub(r'[\\/:*?"<>|]+', '-', title).strip()
     doc_path = DOCS_DIR / f"BOOK - {safe_title} - {RUN_ID}.docx"
 
     doc = Document()
 
-    # ---- Page size & margins ----
+    # Page size & margins
     section = doc.sections[0]
     section.page_width  = Inches(8.5)
     section.page_height = Inches(11)
@@ -94,17 +90,17 @@ def ensure_doc(title: str):
         pass
     _set_mirror_margins(doc)
 
-    # ---- Base style (Normal) ----
+    # Base style
     normal = doc.styles["Normal"]
     normal.font.name = "Cambria"
     normal.font.size = Pt(13)
     pf = normal.paragraph_format
     pf.space_before = Pt(0)
-    pf.space_after  = Pt(6)  # small visual gap
+    pf.space_after  = Pt(6)
     pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
     pf.line_spacing = 1.2
 
-    # Apply same spacing rules to headings so Word does not add extra gaps
+    # Headings
     for style_name in ("Heading 1", "Heading 2", "Title"):
         try:
             st = doc.styles[style_name]
@@ -127,23 +123,8 @@ def ensure_doc(title: str):
 def save_doc(doc: Document, path: Path):
     doc.save(str(path))
 
-def load_checkpoint():
-    if CHECKPOINT.exists():
-        with open(CHECKPOINT, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return None
-
-def save_checkpoint(state: dict):
-    with open(CHECKPOINT, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
 # ---------------- TOC helpers ----------------
 def flatten_toc(toc_list):
-    """
-    Normalize the TOC into:
-      [{"title": "Chapter X ...", "subs": ["sub1","sub2", ...]}, ...]
-    Accepts plain strings (chapter without subs) or {chapter: [subs]} dicts.
-    """
     chapters = []
     for item in toc_list:
         if isinstance(item, str):
@@ -153,12 +134,11 @@ def flatten_toc(toc_list):
                 subs = v if isinstance(v, list) else []
                 chapters.append({"title": k, "subs": subs})
         else:
-            raise ValueError("TOC item non valido: usa stringa o dict {chapter: [subs...]}")
+            raise ValueError("Invalid TOC item")
     return chapters
 
 # ---------------- OpenAI helpers ----------------
 def responses_text(resp):
-    # Robust extractor across Responses API shapes
     if hasattr(resp, "output") and resp.output:
         out = []
         for block in resp.output:
@@ -188,29 +168,27 @@ def call_openai(prompt: str, max_tokens: int) -> str:
 # ---------------- Memory (summary + claims + angle) ----------------
 def build_angle(chapter: str, sub: str, rolling_summary: str, claims: list):
     clist = "\n".join(f"- {c}" for c in (claims or [])[:7]) or "- (none)"
-    prompt = f"""
+    prompt = f'''
 You are a content planner.
-Given the rolling summary and covered claims, provide ONE sentence (max 25 words) that states the UNIQUE ANGLE for the next section.
+Given the rolling summary and the covered claims, propose ONE new angle (max 25 words) for the NEXT section.
+Do not restate the subheading. Be specific.
 
 CHAPTER: {chapter}
 SUBHEADING: {sub}
 
 ROLLING SUMMARY:
-{rolling_summary or '(none)'}
+{rolling_summary or "(none)"}
 
 COVERED CLAIMS:
 {clist}
 
-Rules:
-- Be concrete and specific (what new example, case, or perspective to add).
-- Do NOT restate the subheading or claims; propose the new angle only.
-- Output ONE sentence, nothing else.
-"""
+Return one sentence only.
+'''
     out = call_openai(prompt, 400) or ""
     return out.splitlines()[0].strip()
 
 def update_memory_from_text(text: str, mem: dict):
-    prompt = f"""
+    prompt = f'''
 Summarize the following section in 120-180 words (plain, non-marketing), then list 5 KEY CLAIMS as standalone sentences.
 
 SECTION:
@@ -226,7 +204,7 @@ CLAIMS:
 - <sentence 3>
 - <sentence 4>
 - <sentence 5>
-"""
+'''
     out = call_openai(prompt, 1200) or ""
     summary, claims = "", []
     m = re.search(r"SUMMARY:\s*([\s\S]*?)\n\s*CLAIMS:", out, re.I)
@@ -243,67 +221,62 @@ CLAIMS:
 # ---------------- Prompt builders ----------------
 END_MARK = "<<<END_OF_SUBHEADING>>>"
 
+STYLE_CONTRACT = '''
+STYLE CONTRACT (MANDATORY):
+- Obey the Buyer Persona exactly for tone, audience, and examples.
+- Keep language conversational and friendly, not technical.
+- Prefer short, concrete sentences. Avoid jargon and fancy words.
+- Replace technical terms with a plain explanation or a quick example.
+- If a sentence sounds formal or academic, rewrite it to be friendly and clear.
+'''
+
 def subheading_prompt(master, persona, title, chapters_list, chapter, sub, mem):
     claims_list = "\n".join(f"- {c}" for c in (mem.get("claims") or [])[:7]) or "- (none)"
-    return f"""
-You are an expert ghostwriter. Write this section of the book with strict adherence to the following instructions.
+    return f'''
+{STYLE_CONTRACT}
 
-PRIMARY INSTRUCTION (OVERRIDES EVERYTHING ELSE):
-Always write in the exact tone, style, and perspective described below. 
-This buyer persona and style guide is your voice — treat it as the single source of truth. 
-If anything in other rules conflicts, the buyer persona instructions win.
-
-BUYER PERSONA & STYLE:
+BUYER PERSONA (DO NOT OUTPUT):
 {persona}
 
----
-
-CONTEXT (for your awareness, not rules):
-Book title: {title}
-Global TOC:
-{chapters_list}
-Current chapter: {chapter}
-Current subheading: {sub}
-
-Previously covered (avoid repeating verbatim):
-Summary so far: {mem.get("summary") or '(none)'}
-Claims so far: {claims_list}
-Angle to adopt: {mem.get("angle") or 'Offer a concrete, fresh angle with specific examples.'}
-
----
-
-WRITING RULES (these apply *in addition* to the buyer persona above):
-1. Follow the Table of Contents exactly; do not invent or skip headings.
-2. Write ~500–600 words of complete, specific content for THIS subheading only.
-3. Stay strictly on-topic, avoid filler or vague language.
-4. Use smooth transitions so it reads like a flowing book chapter.
-5. Never use placeholders, meta comments, or decorative separators (---, ***).
-6. Do not restate the subheading or write “Chapter/Day …” in the body.
-7. Use **bold** sparingly (max 8 words, never entire lines/paragraphs).
-8. If ideas overlap with earlier sections, bring a *new example, case, or perspective*.
-
-OUTPUT:
-- Produce only the body text for this subheading.
-- End cleanly with prose, then output exactly this on a new line: <<<END_OF_SUBHEADING>>>
-"""
-
-def chapter_only_prompt(master, persona, title, chapters_list, chapter):
-    return f"""
-You are an expert ghostwriter.
-
---- MASTER PROMPT (DO NOT OUTPUT) ---
+MASTER GUIDELINES (DO NOT OUTPUT):
 {master}
 
---- BUYER PERSONA & STYLE (DO NOT OUTPUT) ---
+CONTEXT SUMMARY (DO NOT OUTPUT):
+{mem.get("summary") or "(none)"}
+
+ALREADY COVERED CLAIMS (avoid repeating; add a new angle if similar):
+{claims_list}
+
+ANGLE TO ADOPT (one sentence):
+{mem.get("angle") or "Bring a new, concrete angle with specific examples."}
+
+BOOK CONTEXT:
+Title: {title}
+
+GLOBAL CHAPTER LIST:
+{chapters_list}
+
+CURRENT CHAPTER: {chapter}
+CURRENT SUBHEADING: {sub}
+
+OUTPUT:
+- Write about 500-600 words of flowing, specific prose for THIS subheading only.
+- Do not restate the heading line in the body.
+- Do not insert new headings.
+- End cleanly with prose, then print exactly this token on a new line: {END_MARK}
+'''
+
+def chapter_only_prompt(master, persona, title, chapters_list, chapter):
+    return f'''
+{STYLE_CONTRACT}
+
+BUYER PERSONA (DO NOT OUTPUT):
 {persona}
 
-STYLE CLAMP (MANDATORY):
-- No "Chapter X:" lines inside the body, no placeholders, no invented headings.
-- Bold only short phrases (<= 8 words), never whole paragraphs.
-- Mini-topics allowed as bold lead-ins or compact bullets only if they truly add clarity.
-The text should feel like a flowing conversation. Avoid over-fragmenting ideas into subheadings.
+MASTER GUIDELINES (DO NOT OUTPUT):
+{master}
 
---- BOOK CONTEXT ---
+BOOK CONTEXT:
 Title: {title}
 
 GLOBAL CHAPTER LIST:
@@ -313,8 +286,9 @@ CURRENT CHAPTER (no subheadings): {chapter}
 
 OUTPUT:
 - Write 2000-3000 words of continuous, engaging prose.
-- End cleanly with prose, then on a new line output exactly: {END_MARK}
-"""
+- Do not insert any headings inside the body.
+- End cleanly with prose, then print exactly this token on a new line: {END_MARK}
+'''
 
 # ---------------- Output cleaning/formatting ----------------
 BULLET_RE = re.compile(r"^(\s*)[-*•]\s+", re.MULTILINE)
@@ -323,14 +297,14 @@ def clean_text(raw: str) -> str:
     if not raw:
         return ""
     text = raw.replace(END_MARK, "").strip()
-    # strip emoji (coarse)
+    # strip emoji (basic)
     text = re.sub(r"[\U00010000-\U0010FFFF]", "", text)
-    # strip markdown headings inside body
+    # strip markdown headings
     text = re.sub(r"^#{2,3}\s+", "", text, flags=re.MULTILINE)
     # lists -> paragraphs
-    text = BULLET_RE.sub(r"\1", text)
+    text = BULLET_RE.sub(r"\\1", text)
 
-    # filter all-caps long lines and unwrap full-bold lines
+    # drop all-caps lines; unwrap full-bold lines
     lines = []
     for ln in text.splitlines():
         t = ln.rstrip()
@@ -338,10 +312,10 @@ def clean_text(raw: str) -> str:
         upper_ratio = (sum(1 for ch in letters if ch.isupper()) / len(letters)) if letters else 0
         if upper_ratio > 0.6 and len(t) > 8:
             continue
-        if re.match(r"^\*\*[^*].*[^*]\*\*$", t):
-            t = re.sub(r"^\*\*(.*)\*\*$", r"\1", t)
+        if re.match(r"^\\*\\*[^*].*[^*]\\*\\*$", t):
+            t = re.sub(r"^\\*\\*(.*)\\*\\*$", r"\\1", t)
         lines.append(t)
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 def is_probable_mini_heading(line: str) -> bool:
     t = line.strip()
@@ -349,13 +323,13 @@ def is_probable_mini_heading(line: str) -> bool:
         return False
     if re.search(r"[.!?]$", t):
         return False
-    if re.match(r"^(chapter|day)\s+\d+:", t, flags=re.I):
+    if re.match(r"^(chapter|day)\\s+\\d+:", t, flags=re.I):
         return False
-    if re.match(r"^\d", t):
+    if re.match(r"^\\d", t):
         return False
     words = t.split()
     caps = sum(1 for w in words if re.match(r"^[A-Z][a-z]+$", w))
-    return caps / len(words) >= 0.6
+    return (caps / len(words)) >= 0.6
 
 def normalize_mini_headings(text: str) -> str:
     lines = [ln for ln in text.splitlines()]
@@ -376,10 +350,10 @@ def normalize_mini_headings(text: str) -> str:
             continue
         out.append(lines[i])
         i += 1
-    return "\n".join(out)
+    return "\\n".join(out)
 
 def split_into_paragraphs_preserving_bold(line: str):
-    parts = re.split(r"(\*\*)", line)
+    parts = re.split(r"(\\*\\*)", line)
     result_spans, bold = [], False
     for part in parts:
         if part == "**":
@@ -396,11 +370,10 @@ def split_into_paragraphs_preserving_bold(line: str):
 
 def add_paragraph_with_bold(doc: Document, text: str):
     p = doc.add_paragraph()
-    # Paragraph formatting (Cambria 13, justified, small gap, Multiple 1.2)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     fmt = p.paragraph_format
     fmt.space_before = Pt(0)
-    fmt.space_after  = Pt(6)  # tiny space between paragraphs
+    fmt.space_after  = Pt(6)
     fmt.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
     fmt.line_spacing = 1.2
 
@@ -414,13 +387,12 @@ def add_paragraph_with_bold(doc: Document, text: str):
 def write_subsection(doc: Document, body_text: str):
     body_text = normalize_mini_headings(body_text)
 
-    for para in body_text.split("\n"):
+    for para in body_text.split("\\n"):
         t = para.strip()
         if not t:
-            continue  # no blank paragraphs (prevents big gaps)
-        # Split very long paragraphs on sentence boundaries
+            continue
         if len(t.split()) > 180:
-            for chunk in re.split(r"(?<=[.!?])\s+", t):
+            for chunk in re.split(r"(?<=[.!?])\\s+", t):
                 if chunk.strip():
                     add_paragraph_with_bold(doc, chunk.strip())
         else:
@@ -429,9 +401,9 @@ def write_subsection(doc: Document, body_text: str):
 # ---------------- Light fixer ----------------
 def quick_validate_and_fix(text: str, covered_claims: list, angle: str):
     issues = []
-    if re.search(r"^#{2,3}\s+", text, flags=re.M):
+    if re.search(r"^#{2,3}\\s+", text, flags=re.M):
         issues.append("Markdown headings inside body.")
-    if re.search(r"^[A-Z0-9][A-Z0-9\s.,;:!?\"'()\\-]{20,}$", text, flags=re.M):
+    if re.search(r"^[A-Z0-9][A-Z0-9\\s.,;:!?\"'()\\\\-]{20,}$", text, flags=re.M):
         issues.append("All-caps paragraph detected.")
     for c in (covered_claims or []):
         if c and len(c) > 8 and c.lower() in text.lower():
@@ -440,36 +412,35 @@ def quick_validate_and_fix(text: str, covered_claims: list, angle: str):
     if not issues:
         return text
 
-    prompt = f"""
+    prompt = f'''
 You are a copy editor. Fix the issues MINIMALLY without changing meaning or tone.
 
 ISSUES:
-{os.linesep.join('- ' + i for i in issues)}
+{os.linesep.join("- " + i for i in issues)}
 
 ANGLE TO KEEP:
-{angle or '(keep focus; no new topics)'}
+{angle or "(keep focus; no new topics)"}
 
 TEXT:
 {text}
 
 RULES:
-- Keep length similar; do NOT shorten significantly.
-- No headings, no all-caps.
-- Start with prose (no repeated subheading).
-- You may turn tiny standalone headings into bold lead-ins.
-- Return ONLY the cleaned text, nothing else.
-"""
+- Keep length similar; do not shorten a lot.
+- No headings, no all caps.
+- Start with prose (do not echo the heading).
+- Return ONLY the cleaned text.
+'''
     fixed = call_openai(prompt, 1800) or text
     return clean_text(fixed)
 
 # ---------------- MAIN ----------------
 def main():
-    # New run => clear any previous checkpoint (we create a fresh file every time)
+    # start clean
     if CHECKPOINT.exists():
         CHECKPOINT.unlink()
 
     if not BOOK_YAML.exists():
-        print(f"Errore: manca {BOOK_YAML.resolve()}")
+        print(f"Missing {BOOK_YAML.resolve()}")
         sys.exit(1)
 
     cfg = load_yaml(BOOK_YAML)
@@ -479,10 +450,9 @@ def main():
 
     doc, doc_path = ensure_doc(title)
 
-    # Memory state
+    # memory
     mem = {"summary": "", "claims": []}
-
-    chapters_list = "\n".join(f"- {c['title']}" for c in chapters)
+    chapters_list = "\\n".join(f"- {c['title']}" for c in chapters)
 
     for ch in chapters:
         h = doc.add_heading(ch["title"], level=1)
@@ -510,42 +480,39 @@ def main():
                 raw = call_openai(prompt, SUBSECTION_TOKENS)
                 cleaned = clean_text(raw)
 
-                # Looser echo filter: drop echoed headings only if we also have real prose
+                # Echo filter (light)
                 n_ch  = ch["title"].strip().lower()
                 n_sub = sub.strip().lower()
                 lines = cleaned.splitlines()
                 has_real_prose = any(len(ln.split()) > 5 for ln in lines)
-
                 if has_real_prose:
-                    cleaned = "\n".join(
+                    cleaned = "\\n".join(
                         ln for ln in lines
                         if ln.strip().lower() not in (n_ch, n_sub)
-                        and not re.match(r"^(chapter|day)\s+\d+:", ln.strip(), flags=re.I)
+                        and not re.match(r"^(chapter|day)\\s+\\d+:", ln.strip(), flags=re.I)
                     )
 
-                # Hard guard: treat too-short/empty as failure so we retry
-                if len(cleaned.split()) < MIN_HARD_WORDS:
+                # hard guard
+                if len(cleaned.split()) < HARD_MIN_WORDS:
                     cleaned = ""
 
-                if cleaned and len(cleaned.split()) >= MIN_SUBSECTION_WORDS:
+                if cleaned and len(cleaned.split()) >= TARGET_MIN_WORDS:
                     out_text = cleaned
                     break
 
                 tries += 1
 
-            # Final fallback: force a second-pass expansion if still short
             if not out_text:
+                # force expansion
                 force_prompt = f"""{subheading_prompt(MASTER_PROMPT, persona, title, chapters_list, ch["title"], sub, mem)}
 IMPORTANT:
-- Your previous attempt was too short. Produce a FULL 700-800 words now.
-- If content overlaps previous sections, add NEW case examples, scripts, checklists.
-- Absolutely NO headings; continuous prose only."""
+- Previous attempt was too short. Produce a complete 500-600 words now.
+- Keep everything extremely simple, friendly, and concrete. No jargon.
+- Do NOT insert headings. Prose only.
+"""
                 raw = call_openai(force_prompt, SUBSECTION_TOKENS)
                 cleaned = clean_text(raw)
-                if len(cleaned.split()) < MIN_SUBSECTION_WORDS:
-                    out_text = cleaned  # accept what we have so nothing is skipped
-                else:
-                    out_text = cleaned
+                out_text = cleaned
 
             fixed = quick_validate_and_fix(out_text, mem.get("claims"), angle=mem.get("angle"))
             write_subsection(doc, fixed)
@@ -554,10 +521,10 @@ IMPORTANT:
             save_doc(doc, doc_path)
 
     save_doc(doc, doc_path)
-    print(f"\n✅ Done. File generated:\n{doc_path.resolve()}\n")
+    print(f"\\nDone. File generated:\\n{doc_path.resolve()}\\n")
 
 if __name__ == "__main__":
     if not os.getenv("OPENAI_API_KEY"):
-        print("Errore: manca OPENAI_API_KEY nell'ambiente.")
+        print("Missing OPENAI_API_KEY")
         sys.exit(1)
     main()
